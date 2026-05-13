@@ -64,14 +64,14 @@ export class AgentAPI {
           id: 'A',
           name: 'Crypto Bull',
           position: 'pro',
-          wallet: 500,
+          wallet: 1.00,
           researchSpent: 0
         },
         B: {
           id: 'B',
           name: 'Skepticon',
           position: 'con',
-          wallet: 500,
+          wallet: 1.00,
           researchSpent: 0
         }
       },

@@ -62,8 +62,33 @@ export async function PUT(request: NextRequest) {
             // Notify who's speaking
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'speaker', agent: speaker, round })}\n\n`));
 
-            // Get agent response (may include x402 research)
+            // Get agent response with research from /api/research endpoint
             const { response, cost_spent, research_used } = await AgentAPI.getAgentResponse(speaker, round, topic);
+
+            // Call /api/research once per round and deduct from agent wallet
+            let researchInsight = null;
+            let researchCost = 0;
+            try {
+              const researchRes = await fetch('http://localhost:3000/api/research', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ topic, agentId: speaker })
+              });
+              const researchData = await researchRes.json();
+              if (researchData.success) {
+                researchInsight = researchData.insight;
+                researchCost = researchData.cost || 0;
+
+                // Deduct $0.005 from agent wallet in debate state
+                const state = AgentAPI.getDebateState();
+                if (state && state.agents[speaker].wallet >= researchCost) {
+                  state.agents[speaker].wallet -= researchCost;
+                  state.agents[speaker].researchSpent += researchCost;
+                }
+              }
+            } catch (e) {
+              // Research call failed, continue without research
+            }
 
             // Add round to state
             AgentAPI.addRound({
@@ -73,8 +98,13 @@ export async function PUT(request: NextRequest) {
               timestamp: Date.now()
             });
 
+            // Append research insight to response
+            const fullResponse = researchInsight
+              ? `${response} [Research: ${researchInsight}]`
+              : response;
+
             // Stream the response word by word for effect
-            const words = response.split(' ');
+            const words = fullResponse.split(' ');
             let currentText = '';
             for (let i = 0; i < words.length; i++) {
               currentText += (i > 0 ? ' ' : '') + words[i];
