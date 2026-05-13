@@ -4,6 +4,19 @@ import { useState, useEffect, useRef } from 'react';
 import BettingPanel from '@/components/BettingPanel';
 import { agentBets, WalletState } from '@/lib/arc-app-kit';
 
+interface JudgeScore {
+  agentId: 'A' | 'B';
+  agentName: string;
+  score: number;
+  breakdown: {
+    argumentation: number;
+    evidence: number;
+    persuasiveness: number;
+    rebuttal: number;
+  };
+  feedback: string;
+}
+
 interface DebateMessage {
   type: 'start' | 'speaker' | 'response' | 'state' | 'end' | 'error';
   agent?: 'A' | 'B';
@@ -14,6 +27,13 @@ interface DebateMessage {
   winner?: 'A' | 'B';
   debate?: any;
   message?: string;
+  judgeResult?: {
+    winner: 'A' | 'B';
+    scores: {
+      A: JudgeScore;
+      B: JudgeScore;
+    };
+  };
 }
 
 interface AgentStats {
@@ -36,6 +56,8 @@ export default function Arena() {
     B: { wallet: 500, researchSpent: 0 }
   });
   const [loading, setLoading] = useState(false);
+  const [judgeScores, setJudgeScores] = useState<{ A: JudgeScore; B: JudgeScore } | null>(null);
+  const [escrowSettled, setEscrowSettled] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
 
   // Poll for bet updates
@@ -161,6 +183,52 @@ export default function Arena() {
     } catch (error) {
       console.error('Debate failed:', error);
       setDebateActive(false);
+    }
+  };
+
+  const handleGetJudgeScores = async () => {
+    try {
+      const response = await fetch('/api/judge', { method: 'POST' });
+      const data = await response.json();
+      if (data.success && data.result) {
+        setJudgeScores(data.result.scores);
+      }
+    } catch (error) {
+      console.error('Failed to get judge scores:', error);
+    }
+  };
+
+  const handleSettleEscrow = async () => {
+    if (!winner) return;
+    try {
+      const response = await fetch('/api/escrow', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ winner })
+      });
+      const data = await response.json();
+      if (data.success) {
+        setEscrowSettled(true);
+      }
+    } catch (error) {
+      console.error('Failed to settle escrow:', error);
+    }
+  };
+
+  const handleResetArena = async () => {
+    try {
+      await fetch('/api/escrow', { method: 'PUT' });
+      setWinner(null);
+      setJudgeScores(null);
+      setEscrowSettled(false);
+      setDebateHistory([]);
+      setCurrentRound(0);
+      setAgentStats({
+        A: { wallet: 500, researchSpent: 0 },
+        B: { wallet: 500, researchSpent: 0 }
+      });
+    } catch (error) {
+      console.error('Failed to reset arena:', error);
     }
   };
 
@@ -349,6 +417,88 @@ export default function Arena() {
                 </div>
               </div>
             </div>
+
+            {/* Judge Scores */}
+            {winner && !judgeScores && (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                <div className="text-center">
+                  <p className="text-gray-400 mb-3">Debate complete! Get judge scores?</p>
+                  <button
+                    onClick={handleGetJudgeScores}
+                    className="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                  >
+                    View Judge Scores
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Judge Scores Display */}
+            {judgeScores && (
+              <div className="bg-gray-900 border border-yellow-600/50 rounded-xl p-4">
+                <h3 className="font-bold text-lg text-yellow-400 mb-4">Judge Scores</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-purple-900/30 rounded-lg p-3">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="font-bold text-purple-300">Agent A</span>
+                      <span className="text-2xl font-bold">{judgeScores.A.score}/40</span>
+                    </div>
+                    <div className="space-y-1 text-sm">
+                      <div className="flex justify-between"><span className="text-gray-400">Argumentation</span><span>{judgeScores.A.breakdown.argumentation}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-400">Evidence</span><span>{judgeScores.A.breakdown.evidence}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-400">Persuasiveness</span><span>{judgeScores.A.breakdown.persuasiveness}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-400">Rebuttal</span><span>{judgeScores.A.breakdown.rebuttal}</span></div>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-2">{judgeScores.A.feedback}</p>
+                  </div>
+                  <div className="bg-cyan-900/30 rounded-lg p-3">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="font-bold text-cyan-300">Agent B</span>
+                      <span className="text-2xl font-bold">{judgeScores.B.score}/40</span>
+                    </div>
+                    <div className="space-y-1 text-sm">
+                      <div className="flex justify-between"><span className="text-gray-400">Argumentation</span><span>{judgeScores.B.breakdown.argumentation}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-400">Evidence</span><span>{judgeScores.B.breakdown.evidence}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-400">Persuasiveness</span><span>{judgeScores.B.breakdown.persuasiveness}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-400">Rebuttal</span><span>{judgeScores.B.breakdown.rebuttal}</span></div>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-2">{judgeScores.B.feedback}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Escrow Settlement */}
+            {winner && judgeScores && !escrowSettled && bets.A + bets.B > 0 && (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                <div className="text-center">
+                  <p className="text-gray-400 mb-3">Settle bets and distribute winnings?</p>
+                  <button
+                    onClick={handleSettleEscrow}
+                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                  >
+                    Settle Escrow
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Escrow Settled */}
+            {escrowSettled && (
+              <div className="bg-green-900/30 border border-green-600/50 rounded-xl p-4">
+                <p className="text-green-400 text-center font-bold">
+                  ✓ Escrow settled! Winnings distributed to winners.
+                </p>
+                <div className="text-center mt-3">
+                  <button
+                    onClick={handleResetArena}
+                    className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                  >
+                    Start New Debate
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Sidebar */}
